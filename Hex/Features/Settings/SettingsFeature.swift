@@ -113,6 +113,7 @@ struct SettingsFeature {
     case updateWordRemapping(WordRemapping)
     case removeWordRemapping(UUID)
     case setRemappingScratchpadFocused(Bool)
+    case setLiveTranscriptionEnabled(Bool)
   }
 
   @Dependency(\.keyEventMonitor) var keyEventMonitor
@@ -412,6 +413,10 @@ struct SettingsFeature {
 
       case let .setRemappingScratchpadFocused(isFocused):
         state.$isRemappingScratchpadFocused.withLock { $0 = isFocused }
+        return .none
+
+      case let .setLiveTranscriptionEnabled(enabled):
+        state.$hexSettings.withLock { $0.liveTranscriptionEnabled = enabled }
         return .none
 
       case .startSettingPasteLastTranscriptHotkey:

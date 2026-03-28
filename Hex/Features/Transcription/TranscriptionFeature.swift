@@ -5,6 +5,7 @@
 //  Created by Kit Langton on 1/24/25.
 //
 
+import AVFoundation
 import ComposableArchitecture
 import CoreGraphics
 import Foundation
@@ -27,6 +28,8 @@ struct TranscriptionFeature {
     var meter: Meter = .init(averagePower: 0, peakPower: 0)
     var sourceAppBundleID: String?
     var sourceAppName: String?
+    var liveTranscriptionPastedWordCount: Int = 0
+    var liveTranscriptionHeldBackWord: String?
     @Shared(.hexSettings) var hexSettings: HexSettings
     @Shared(.isRemappingScratchpadFocused) var isRemappingScratchpadFocused: Bool = false
     @Shared(.modelBootstrapState) var modelBootstrapState: ModelBootstrapState
@@ -53,6 +56,11 @@ struct TranscriptionFeature {
     case transcriptionResult(String, URL)
     case transcriptionError(Error, URL?)
 
+    // Live transcription
+    case liveTranscriptionTick
+    case liveTranscriptionResult(String)
+    case liveTranscriptionError
+
     // Model availability
     case modelMissing
   }
@@ -61,6 +69,8 @@ struct TranscriptionFeature {
     case metering
     case recordingCleanup
     case transcription
+    case liveTranscriptionTimer
+    case liveTranscriptionSnapshot
   }
 
   @Dependency(\.transcription) var transcription
@@ -121,6 +131,17 @@ struct TranscriptionFeature {
 
       case let .transcriptionError(error, audioURL):
         return handleTranscriptionError(&state, error: error, audioURL: audioURL)
+
+      // MARK: - Live Transcription
+
+      case .liveTranscriptionTick:
+        return handleLiveTranscriptionTick(&state)
+
+      case let .liveTranscriptionResult(text):
+        return handleLiveTranscriptionResult(&state, text: text)
+
+      case .liveTranscriptionError:
+        return .none
 
       case .modelMissing:
         return .none
@@ -286,6 +307,8 @@ private extension TranscriptionFeature {
       )
     }
     state.isRecording = true
+    state.liveTranscriptionPastedWordCount = 0
+    state.liveTranscriptionHeldBackWord = nil
     let startTime = now
     state.recordingStartTime = startTime
     
@@ -297,6 +320,19 @@ private extension TranscriptionFeature {
     transcriptionFeatureLogger.notice("Recording started at \(startTime.ISO8601Format())")
 
     // Prevent system sleep during recording
+    let liveTranscriptionEnabled = state.hexSettings.liveTranscriptionEnabled
+    transcriptionFeatureLogger.notice("Recording start: liveTranscriptionEnabled=\(liveTranscriptionEnabled)")
+    let liveTimerEffect: Effect<Action> = liveTranscriptionEnabled
+      ? .run { send in
+          try await Task.sleep(for: .seconds(1.5))
+          while !Task.isCancelled {
+            await send(.liveTranscriptionTick)
+            try await Task.sleep(for: .seconds(1))
+          }
+        }
+        .cancellable(id: CancelID.liveTranscriptionTimer, cancelInFlight: true)
+      : .none
+
     return .merge(
       .cancel(id: CancelID.recordingCleanup),
       .run { [sleepManagement, preventSleep = state.hexSettings.preventSystemSleep] _ in
@@ -307,13 +343,14 @@ private extension TranscriptionFeature {
           await sleepManagement.preventSleep(reason: "Hex Voice Recording")
         }
         await recording.startRecording()
-      }
+      },
+      liveTimerEffect
     )
   }
 
   func handleStopRecording(_ state: inout State) -> Effect<Action> {
     state.isRecording = false
-    
+
     let stopTime = now
     let startTime = state.recordingStartTime
     let duration = startTime.map { stopTime.timeIntervalSince($0) } ?? 0
@@ -339,12 +376,18 @@ private extension TranscriptionFeature {
       // If the user recorded for less than minimumKeyTime and the hotkey is modifier-only,
       // discard the audio to avoid accidental triggers.
       transcriptionFeatureLogger.notice("Discarding short recording per decision \(String(describing: decision))")
-      return .run { _ in
-        let url = await recording.stopRecording()
-        guard !Task.isCancelled else { return }
-        try? FileManager.default.removeItem(at: url)
-      }
-      .cancellable(id: CancelID.recordingCleanup, cancelInFlight: true)
+      state.liveTranscriptionPastedWordCount = 0
+    state.liveTranscriptionHeldBackWord = nil
+      return .merge(
+        .cancel(id: CancelID.liveTranscriptionTimer),
+        .cancel(id: CancelID.liveTranscriptionSnapshot),
+        .run { _ in
+          let url = await recording.stopRecording()
+          guard !Task.isCancelled else { return }
+          try? FileManager.default.removeItem(at: url)
+        }
+        .cancellable(id: CancelID.recordingCleanup, cancelInFlight: true)
+      )
     }
 
     // Otherwise, proceed to transcription
@@ -355,7 +398,10 @@ private extension TranscriptionFeature {
 
     state.isPrewarming = true
 
-    return .run { [sleepManagement] send in
+    return .merge(
+      .cancel(id: CancelID.liveTranscriptionTimer),
+      .cancel(id: CancelID.liveTranscriptionSnapshot),
+      .run { [sleepManagement] send in
       // Allow system to sleep again
       await sleepManagement.allowSleep()
 
@@ -384,6 +430,7 @@ private extension TranscriptionFeature {
       }
     }
     .cancellable(id: CancelID.transcription)
+    )
   }
 }
 
@@ -448,16 +495,33 @@ private extension TranscriptionFeature {
     let sourceAppBundleID = state.sourceAppBundleID
     let sourceAppName = state.sourceAppName
     let transcriptionHistory = state.$transcriptionHistory
+    let liveTranscriptionEnabled = state.hexSettings.liveTranscriptionEnabled
+    let alreadyPastedWordCount = state.liveTranscriptionPastedWordCount
+    state.liveTranscriptionPastedWordCount = 0
+    state.liveTranscriptionHeldBackWord = nil
 
     return .run { send in
       do {
+        let finalDelta: String?
+        if liveTranscriptionEnabled {
+          let words = modifiedResult.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+          if words.count > alreadyPastedWordCount {
+            let newWords = words[alreadyPastedWordCount...]
+            finalDelta = (alreadyPastedWordCount > 0 ? " " : "") + newWords.joined(separator: " ")
+          } else {
+            finalDelta = ""
+          }
+        } else {
+          finalDelta = nil
+        }
         try await finalizeRecordingAndStoreTranscript(
           result: modifiedResult,
           duration: duration,
           sourceAppBundleID: sourceAppBundleID,
           sourceAppName: sourceAppName,
           audioURL: audioURL,
-          transcriptionHistory: transcriptionHistory
+          transcriptionHistory: transcriptionHistory,
+          liveTranscriptionDelta: finalDelta
         )
       } catch {
         await send(.transcriptionError(error, audioURL))
@@ -489,7 +553,8 @@ private extension TranscriptionFeature {
     sourceAppBundleID: String?,
     sourceAppName: String?,
     audioURL: URL,
-    transcriptionHistory: Shared<TranscriptionHistory>
+    transcriptionHistory: Shared<TranscriptionHistory>,
+    liveTranscriptionDelta: String? = nil
   ) async throws {
     @Shared(.hexSettings) var hexSettings: HexSettings
 
@@ -519,7 +584,11 @@ private extension TranscriptionFeature {
       try? FileManager.default.removeItem(at: audioURL)
     }
 
-    await pasteboard.paste(result)
+    // When live transcription is active, only paste the remaining delta
+    let textToPaste = liveTranscriptionDelta ?? result
+    if !textToPaste.isEmpty {
+      await pasteboard.paste(textToPaste)
+    }
     soundEffect.play(.pasteTranscript)
   }
 }
@@ -531,9 +600,13 @@ private extension TranscriptionFeature {
     state.isTranscribing = false
     state.isRecording = false
     state.isPrewarming = false
+    state.liveTranscriptionPastedWordCount = 0
+    state.liveTranscriptionHeldBackWord = nil
 
     return .merge(
       .cancel(id: CancelID.transcription),
+      .cancel(id: CancelID.liveTranscriptionTimer),
+      .cancel(id: CancelID.liveTranscriptionSnapshot),
       .run { [sleepManagement] _ in
         // Allow system to sleep again
         await sleepManagement.allowSleep()
@@ -550,17 +623,112 @@ private extension TranscriptionFeature {
   func handleDiscard(_ state: inout State) -> Effect<Action> {
     state.isRecording = false
     state.isPrewarming = false
+    state.liveTranscriptionPastedWordCount = 0
+    state.liveTranscriptionHeldBackWord = nil
 
     // Silently discard - no sound effect
-    return .run { [sleepManagement] _ in
-      // Allow system to sleep again
-      await sleepManagement.allowSleep()
-      let url = await recording.stopRecording()
-      guard !Task.isCancelled else { return }
-      try? FileManager.default.removeItem(at: url)
-    }
-    .cancellable(id: CancelID.recordingCleanup, cancelInFlight: true)
+    return .merge(
+      .cancel(id: CancelID.liveTranscriptionTimer),
+      .cancel(id: CancelID.liveTranscriptionSnapshot),
+      .run { [sleepManagement] _ in
+        // Allow system to sleep again
+        await sleepManagement.allowSleep()
+        let url = await recording.stopRecording()
+        guard !Task.isCancelled else { return }
+        try? FileManager.default.removeItem(at: url)
+      }
+      .cancellable(id: CancelID.recordingCleanup, cancelInFlight: true)
+    )
   }
+}
+
+// MARK: - Live Transcription Handlers
+
+private extension TranscriptionFeature {
+  func handleLiveTranscriptionTick(_ state: inout State) -> Effect<Action> {
+    guard state.isRecording else { return .none }
+    transcriptionFeatureLogger.notice("Live transcription tick: starting snapshot transcription")
+    let model = state.hexSettings.selectedModel
+    let language = state.hexSettings.outputLanguage
+
+    return .run { [recording, transcription] send in
+      let snapshotURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("hex-live-\(UUID().uuidString).wav")
+      defer { try? FileManager.default.removeItem(at: snapshotURL) }
+
+      // Export accumulated samples directly from memory — no file copying or header parsing
+      guard await recording.exportLiveSnapshot(snapshotURL) else {
+        transcriptionFeatureLogger.error("Live transcription: snapshot export failed (no samples)")
+        await send(.liveTranscriptionError)
+        return
+      }
+
+      let fileSize = (try? FileManager.default.attributesOfItem(atPath: snapshotURL.path)[.size] as? Int) ?? 0
+      transcriptionFeatureLogger.notice("Live transcription: exported \(fileSize) bytes, transcribing with model \(model)")
+
+      let decodeOptions = DecodingOptions(
+        language: language,
+        detectLanguage: language == nil,
+        chunkingStrategy: .vad
+      )
+      let result = try await transcription.transcribe(snapshotURL, model, decodeOptions) { _ in }
+      transcriptionFeatureLogger.notice("Live transcription: got result '\(result)' (\(result.count) chars)")
+      await send(.liveTranscriptionResult(result))
+    } catch: { error, send in
+      transcriptionFeatureLogger.error("Live transcription: snapshot failed: \(error.localizedDescription)")
+      await send(.liveTranscriptionError)
+    }
+    .cancellable(id: CancelID.liveTranscriptionSnapshot, cancelInFlight: true)
+  }
+
+  func handleLiveTranscriptionResult(_ state: inout State, text: String) -> Effect<Action> {
+    guard !text.isEmpty else { return .none }
+
+    // Apply word modifications
+    let remappings = state.hexSettings.wordRemappings
+    let removalsEnabled = state.hexSettings.wordRemovalsEnabled
+    let removals = state.hexSettings.wordRemovals
+    var modifiedText = text
+    if !state.isRemappingScratchpadFocused {
+      if removalsEnabled {
+        modifiedText = WordRemovalApplier.apply(modifiedText, removals: removals)
+      }
+      modifiedText = WordRemappingApplier.apply(modifiedText, remappings: remappings)
+    }
+
+    guard !modifiedText.isEmpty else { return .none }
+
+    // Split into words. Hold back the last word unless it was the same last tick
+    // (confirmed stable). This prevents pasting partial words like "ham" that later
+    // become "hamburgers", while still pasting the final word once it's confirmed.
+    let words = modifiedText.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+    guard words.count > state.liveTranscriptionPastedWordCount else { return .none }
+
+    let lastWord = words.last ?? ""
+    let previousHeldBack = state.liveTranscriptionHeldBackWord
+
+    // If the last word is the same as what we held back last tick, it's stable — include it
+    let safeWordCount: Int
+    if lastWord == previousHeldBack {
+      safeWordCount = words.count
+      state.liveTranscriptionHeldBackWord = nil
+    } else {
+      safeWordCount = max(0, words.count - 1)
+      state.liveTranscriptionHeldBackWord = lastWord
+    }
+
+    guard safeWordCount > state.liveTranscriptionPastedWordCount else { return .none }
+
+    let newWords = words[state.liveTranscriptionPastedWordCount..<safeWordCount]
+    let delta = (state.liveTranscriptionPastedWordCount > 0 ? " " : "") + newWords.joined(separator: " ")
+    state.liveTranscriptionPastedWordCount = safeWordCount
+    transcriptionFeatureLogger.info("Live transcription delta: '\(delta)' (\(newWords.count) new words, total \(safeWordCount)/\(words.count) words)")
+
+    return .run { [pasteboard] _ in
+      await pasteboard.paste(delta)
+    }
+  }
+
 }
 
 // MARK: - View

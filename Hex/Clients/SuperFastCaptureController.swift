@@ -114,6 +114,7 @@ final class SuperFastCaptureController {
   private var converter: AVAudioConverter?
   private var activeRecording: ActiveRecording?
   private var keepWarmBuffer = false
+  private var liveTranscriptionSamples: [Float] = []
   private var lastProcessedBufferAt: Date?
   private var recentCallbackIntervals: [TimeInterval] = []
   private var recentBufferDurations: [TimeInterval] = []
@@ -132,6 +133,10 @@ final class SuperFastCaptureController {
 
   var isRecording: Bool {
     processingQueue.sync { activeRecording != nil }
+  }
+
+  var currentRecordingURL: URL? {
+    processingQueue.sync { activeRecording?.url }
   }
 
   var stopTimingEstimate: StopTimingEstimate {
@@ -245,8 +250,10 @@ final class SuperFastCaptureController {
         let preRollFrameCount = Int(preRollDuration * SuperFastCaptureConstants.sampleRate)
         let preRollSamples = ringBuffer.recentSamples(count: preRollFrameCount)
         let prependedDuration = Double(preRollSamples.count) / SuperFastCaptureConstants.sampleRate
+        liveTranscriptionSamples.removeAll(keepingCapacity: true)
         if !preRollSamples.isEmpty {
           try write(samples: preRollSamples, to: file)
+          liveTranscriptionSamples.append(contentsOf: preRollSamples)
         }
 
         logger.notice(
@@ -273,10 +280,55 @@ final class SuperFastCaptureController {
     processingQueue.sync {
       let url = activeRecording?.url
       activeRecording = nil
+      liveTranscriptionSamples.removeAll(keepingCapacity: false)
       if clearBuffer {
         ringBuffer.clear()
       }
       return url
+    }
+  }
+
+  /// Write accumulated recording samples to a clean WAV file for live transcription.
+  /// Only briefly locks the processing queue to copy samples, then writes to disk
+  /// off-queue so audio capture is never blocked.
+  func exportLiveSnapshot(to url: URL) -> Bool {
+    // Brief lock — copy the full sample array
+    let samples: [Float] = processingQueue.sync {
+      guard !liveTranscriptionSamples.isEmpty else { return [] }
+      return liveTranscriptionSamples
+    }
+    guard !samples.isEmpty else { return false }
+
+    // Build and write WAV off the processing queue
+    let sampleRate: UInt32 = UInt32(SuperFastCaptureConstants.sampleRate)
+    let channels: UInt16 = 1
+    let bitsPerSample: UInt16 = 32
+    let blockAlign = channels * (bitsPerSample / 8)
+    let byteRate = sampleRate * UInt32(blockAlign)
+    let pcmByteCount = samples.count * MemoryLayout<Float>.size
+    let fileSize = UInt32(36 + pcmByteCount)
+
+    var wav = Data(capacity: 44 + pcmByteCount)
+    wav.append(contentsOf: "RIFF".utf8)
+    wav.append(contentsOf: withUnsafeBytes(of: fileSize.littleEndian) { Array($0) })
+    wav.append(contentsOf: "WAVE".utf8)
+    wav.append(contentsOf: "fmt ".utf8)
+    wav.append(contentsOf: withUnsafeBytes(of: UInt32(16).littleEndian) { Array($0) })
+    wav.append(contentsOf: withUnsafeBytes(of: UInt16(3).littleEndian) { Array($0) })  // IEEE float
+    wav.append(contentsOf: withUnsafeBytes(of: channels.littleEndian) { Array($0) })
+    wav.append(contentsOf: withUnsafeBytes(of: sampleRate.littleEndian) { Array($0) })
+    wav.append(contentsOf: withUnsafeBytes(of: byteRate.littleEndian) { Array($0) })
+    wav.append(contentsOf: withUnsafeBytes(of: blockAlign.littleEndian) { Array($0) })
+    wav.append(contentsOf: withUnsafeBytes(of: bitsPerSample.littleEndian) { Array($0) })
+    wav.append(contentsOf: "data".utf8)
+    wav.append(contentsOf: withUnsafeBytes(of: UInt32(pcmByteCount).littleEndian) { Array($0) })
+    samples.withUnsafeBytes { wav.append(contentsOf: $0) }
+
+    do {
+      try wav.write(to: url, options: .atomic)
+      return true
+    } catch {
+      return false
     }
   }
 
@@ -323,6 +375,8 @@ final class SuperFastCaptureController {
 
     do {
       try recording.file.write(from: converted)
+      // Accumulate samples for live transcription snapshots
+      liveTranscriptionSamples.append(contentsOf: UnsafeBufferPointer(start: samples, count: sampleCount))
     } catch {
       logger.error("Failed to write capture engine audio: \(error.localizedDescription)")
       activeRecording = nil

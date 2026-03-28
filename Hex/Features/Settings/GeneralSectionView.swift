@@ -83,6 +83,19 @@ struct GeneralSectionView: View {
 			}
 
 			Label {
+				Toggle(
+					"Live Transcription",
+					isOn: Binding(
+						get: { store.hexSettings.liveTranscriptionEnabled },
+						set: { store.send(.setLiveTranscriptionEnabled($0)) }
+					)
+				)
+				Text("Paste text progressively while recording instead of all at once after stopping")
+			} icon: {
+				Image(systemName: "text.bubble")
+			}
+
+			Label {
 				HStack(alignment: .center) {
 					Text("Audio Behavior while Recording")
 				Spacer()
