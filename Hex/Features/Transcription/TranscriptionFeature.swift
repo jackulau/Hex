@@ -27,8 +27,7 @@ struct TranscriptionFeature {
     var meter: Meter = .init(averagePower: 0, peakPower: 0)
     var sourceAppBundleID: String?
     var sourceAppName: String?
-    var liveTranscriptionPastedWordCount: Int = 0
-    var liveTranscriptionHeldBackWord: String?
+    var liveTranscriptionDelta: LiveTranscriptionDelta = .init()
     @Shared(.hexSettings) var hexSettings: HexSettings
     @Shared(.isRemappingScratchpadFocused) var isRemappingScratchpadFocused: Bool = false
     @Shared(.modelBootstrapState) var modelBootstrapState: ModelBootstrapState
@@ -306,8 +305,7 @@ private extension TranscriptionFeature {
       )
     }
     state.isRecording = true
-    state.liveTranscriptionPastedWordCount = 0
-    state.liveTranscriptionHeldBackWord = nil
+    state.liveTranscriptionDelta.reset()
     let startTime = now
     state.recordingStartTime = startTime
     
@@ -374,8 +372,7 @@ private extension TranscriptionFeature {
       // If the user recorded for less than minimumKeyTime and the hotkey is modifier-only,
       // discard the audio to avoid accidental triggers.
       transcriptionFeatureLogger.notice("Discarding short recording per decision \(String(describing: decision))")
-      state.liveTranscriptionPastedWordCount = 0
-    state.liveTranscriptionHeldBackWord = nil
+      state.liveTranscriptionDelta.reset()
       return .merge(
         .cancel(id: CancelID.liveTranscriptionTimer),
         .cancel(id: CancelID.liveTranscriptionSnapshot),
@@ -494,24 +491,14 @@ private extension TranscriptionFeature {
     let sourceAppName = state.sourceAppName
     let transcriptionHistory = state.$transcriptionHistory
     let liveTranscriptionEnabled = state.hexSettings.liveTranscriptionEnabled
-    let alreadyPastedWordCount = state.liveTranscriptionPastedWordCount
-    state.liveTranscriptionPastedWordCount = 0
-    state.liveTranscriptionHeldBackWord = nil
+    let liveDelta = state.liveTranscriptionDelta
+    state.liveTranscriptionDelta.reset()
 
     return .run { send in
       do {
-        let finalDelta: String?
-        if liveTranscriptionEnabled {
-          let words = modifiedResult.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-          if words.count > alreadyPastedWordCount {
-            let newWords = words[alreadyPastedWordCount...]
-            finalDelta = (alreadyPastedWordCount > 0 ? " " : "") + newWords.joined(separator: " ")
-          } else {
-            finalDelta = ""
-          }
-        } else {
-          finalDelta = nil
-        }
+        let finalDelta: String? = liveTranscriptionEnabled
+          ? liveDelta.computeFinalDelta(from: modifiedResult)
+          : nil
         try await finalizeRecordingAndStoreTranscript(
           result: modifiedResult,
           duration: duration,
@@ -598,8 +585,7 @@ private extension TranscriptionFeature {
     state.isTranscribing = false
     state.isRecording = false
     state.isPrewarming = false
-    state.liveTranscriptionPastedWordCount = 0
-    state.liveTranscriptionHeldBackWord = nil
+    state.liveTranscriptionDelta.reset()
 
     return .merge(
       .cancel(id: CancelID.transcription),
@@ -621,8 +607,7 @@ private extension TranscriptionFeature {
   func handleDiscard(_ state: inout State) -> Effect<Action> {
     state.isRecording = false
     state.isPrewarming = false
-    state.liveTranscriptionPastedWordCount = 0
-    state.liveTranscriptionHeldBackWord = nil
+    state.liveTranscriptionDelta.reset()
 
     // Silently discard - no sound effect
     return .merge(
@@ -689,31 +674,9 @@ private extension TranscriptionFeature {
 
     guard !modifiedText.isEmpty else { return .none }
 
-    // Split into words. Hold back the last word unless it was the same last tick
-    // (confirmed stable). This prevents pasting partial words like "ham" that later
-    // become "hamburgers", while still pasting the final word once it's confirmed.
-    let words = modifiedText.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-    guard words.count > state.liveTranscriptionPastedWordCount else { return .none }
-
-    let lastWord = words.last ?? ""
-    let previousHeldBack = state.liveTranscriptionHeldBackWord
-
-    // If the last word is the same as what we held back last tick, it's stable — include it
-    let safeWordCount: Int
-    if lastWord == previousHeldBack {
-      safeWordCount = words.count
-      state.liveTranscriptionHeldBackWord = nil
-    } else {
-      safeWordCount = max(0, words.count - 1)
-      state.liveTranscriptionHeldBackWord = lastWord
-    }
-
-    guard safeWordCount > state.liveTranscriptionPastedWordCount else { return .none }
-
-    let newWords = words[state.liveTranscriptionPastedWordCount..<safeWordCount]
-    let delta = (state.liveTranscriptionPastedWordCount > 0 ? " " : "") + newWords.joined(separator: " ")
-    state.liveTranscriptionPastedWordCount = safeWordCount
-    transcriptionFeatureLogger.info("Live transcription delta: '\(delta)' (\(newWords.count) new words, total \(safeWordCount)/\(words.count) words)")
+    let result = state.liveTranscriptionDelta.computeDelta(from: modifiedText)
+    guard !result.textToPaste.isEmpty else { return .none }
+    let delta = result.textToPaste
 
     return .run { [pasteboard] _ in
       await pasteboard.paste(delta)
