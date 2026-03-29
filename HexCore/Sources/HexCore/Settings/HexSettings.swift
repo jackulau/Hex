@@ -6,6 +6,11 @@ public enum RecordingAudioBehavior: String, Codable, CaseIterable, Equatable, Se
 	case doNothing
 }
 
+public enum RecordingMode: String, Codable, CaseIterable, Equatable, Sendable {
+	case singleTap    // Toggle: tap to start, tap to stop
+	case doubleTap    // Hold-to-record + double-tap lock
+}
+
 /// User-configurable settings saved to disk.
 public struct HexSettings: Codable, Equatable, Sendable {
 	public static let defaultPasteLastTranscriptHotkey = HotKey(key: .v, modifiers: [.option, .shift])
@@ -35,7 +40,7 @@ public struct HexSettings: Codable, Equatable, Sendable {
 	public var minimumKeyTime: Double
 	public var copyToClipboard: Bool
 	public var superFastModeEnabled: Bool
-	public var useDoubleTapOnly: Bool
+	public var recordingMode: RecordingMode
 	public var doubleTapLockEnabled: Bool
 	public var outputLanguage: String?
 	public var selectedMicrophoneID: String?
@@ -50,9 +55,7 @@ public struct HexSettings: Codable, Equatable, Sendable {
 	public var liveTranscriptionEnabled: Bool
 
 	private mutating func normalizeDoubleTapSettings() {
-		if !doubleTapLockEnabled {
-			useDoubleTapOnly = false
-		}
+		// No normalization needed with recordingMode enum
 	}
 
 	public init(
@@ -68,7 +71,7 @@ public struct HexSettings: Codable, Equatable, Sendable {
 		minimumKeyTime: Double = HexCoreConstants.defaultMinimumKeyTime,
 		copyToClipboard: Bool = false,
 		superFastModeEnabled: Bool = false,
-		useDoubleTapOnly: Bool = false,
+		recordingMode: RecordingMode = .singleTap,
 		doubleTapLockEnabled: Bool = true,
 		outputLanguage: String? = nil,
 		selectedMicrophoneID: String? = nil,
@@ -94,7 +97,7 @@ public struct HexSettings: Codable, Equatable, Sendable {
 		self.minimumKeyTime = minimumKeyTime
 		self.copyToClipboard = copyToClipboard
 		self.superFastModeEnabled = superFastModeEnabled
-		self.useDoubleTapOnly = useDoubleTapOnly
+		self.recordingMode = recordingMode
 		self.doubleTapLockEnabled = doubleTapLockEnabled
 		self.outputLanguage = outputLanguage
 		self.selectedMicrophoneID = selectedMicrophoneID
@@ -143,7 +146,8 @@ private enum HexSettingKey: String, CodingKey, CaseIterable {
 	case minimumKeyTime
 	case copyToClipboard
 	case superFastModeEnabled
-	case useDoubleTapOnly
+	case recordingMode
+	case useDoubleTapOnly // Legacy
 	case doubleTapLockEnabled
 	case outputLanguage
 	case selectedMicrophoneID
@@ -241,7 +245,20 @@ private enum HexSettingsSchema {
 		SettingsField(.minimumKeyTime, keyPath: \.minimumKeyTime, default: defaults.minimumKeyTime).eraseToAny(),
 		SettingsField(.copyToClipboard, keyPath: \.copyToClipboard, default: defaults.copyToClipboard).eraseToAny(),
 		SettingsField(.superFastModeEnabled, keyPath: \.superFastModeEnabled, default: defaults.superFastModeEnabled).eraseToAny(),
-		SettingsField(.useDoubleTapOnly, keyPath: \.useDoubleTapOnly, default: defaults.useDoubleTapOnly).eraseToAny(),
+		SettingsField(
+			.recordingMode,
+			keyPath: \.recordingMode,
+			default: defaults.recordingMode,
+			decode: { container, key, defaultValue in
+				if let value = try container.decodeIfPresent(RecordingMode.self, forKey: key) {
+					return value
+				}
+				if let legacy = try container.decodeIfPresent(Bool.self, forKey: .useDoubleTapOnly) {
+					return legacy ? .doubleTap : .singleTap
+				}
+				return defaultValue
+			}
+		).eraseToAny(),
 		SettingsField(.doubleTapLockEnabled, keyPath: \.doubleTapLockEnabled, default: defaults.doubleTapLockEnabled).eraseToAny(),
 		SettingsField(
 			.outputLanguage,

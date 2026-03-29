@@ -223,13 +223,6 @@ struct SettingsFeature {
     Reduce { state, action in
       switch action {
       case .binding:
-        let didNormalizeDoubleTapOnly = !state.hexSettings.doubleTapLockEnabled && state.hexSettings.useDoubleTapOnly
-        if didNormalizeDoubleTapOnly {
-          state.$hexSettings.withLock {
-            $0.useDoubleTapOnly = false
-          }
-        }
-
         return .none
 
       case .task:
@@ -478,16 +471,10 @@ struct SettingsFeature {
       case let .setDoubleTapLockEnabled(enabled):
         state.$hexSettings.withLock {
           $0.doubleTapLockEnabled = enabled
-          if !enabled {
-            $0.useDoubleTapOnly = false
-          }
         }
         return .none
 
-      case let .setUseDoubleTapOnly(enabled):
-        state.$hexSettings.withLock {
-          $0.useDoubleTapOnly = enabled && $0.doubleTapLockEnabled
-        }
+      case .setUseDoubleTapOnly:
         return .none
 
       case let .setMinimumKeyTime(value):

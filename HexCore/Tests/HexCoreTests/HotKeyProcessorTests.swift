@@ -311,14 +311,102 @@ struct HotKeyProcessorTests {
     }
 
     @Test
-    func doubleTapOnly_ignoredWhenDoubleTapLockDisabled() throws {
+    func doubleTapMode_worksWithDoubleTapLockDisabled() throws {
         runScenario(
             hotkey: HotKey(key: .a, modifiers: [.command]),
-            useDoubleTapOnly: true,
+            recordingMode: .doubleTap,
             doubleTapLockEnabled: false,
             steps: [
                 ScenarioStep(time: 0.0, key: .a, modifiers: [.command], expectedOutput: .startRecording, expectedIsMatched: true),
                 ScenarioStep(time: 0.2, key: nil, modifiers: [.command], expectedOutput: .stopRecording, expectedIsMatched: false),
+            ]
+        )
+    }
+
+    // MARK: - Single-Tap Toggle Mode Tests
+
+    @Test
+    func singleTapToggle_startsOnPress_standard() throws {
+        runScenario(
+            hotkey: HotKey(key: .semicolon, modifiers: [.control]),
+            recordingMode: .singleTap,
+            steps: [
+                ScenarioStep(time: 0.0, key: .semicolon, modifiers: [.control], expectedOutput: .startRecording, expectedIsMatched: true, expectedState: .doubleTapLock),
+            ]
+        )
+    }
+
+    @Test
+    func singleTapToggle_staysRecordingOnRelease_standard() throws {
+        runScenario(
+            hotkey: HotKey(key: .semicolon, modifiers: [.control]),
+            recordingMode: .singleTap,
+            steps: [
+                ScenarioStep(time: 0.0, key: .semicolon, modifiers: [.control], expectedOutput: .startRecording, expectedIsMatched: true),
+                ScenarioStep(time: 0.1, key: nil, modifiers: [.control], expectedOutput: nil, expectedIsMatched: true, expectedState: .doubleTapLock),
+                ScenarioStep(time: 0.2, key: nil, modifiers: [], expectedOutput: nil, expectedIsMatched: true, expectedState: .doubleTapLock),
+            ]
+        )
+    }
+
+    @Test
+    func singleTapToggle_stopsOnSecondPress_standard() throws {
+        runScenario(
+            hotkey: HotKey(key: .semicolon, modifiers: [.control]),
+            recordingMode: .singleTap,
+            steps: [
+                ScenarioStep(time: 0.0, key: .semicolon, modifiers: [.control], expectedOutput: .startRecording, expectedIsMatched: true),
+                ScenarioStep(time: 0.1, key: nil, modifiers: [], expectedOutput: nil, expectedIsMatched: true),
+                ScenarioStep(time: 1.0, key: .semicolon, modifiers: [.control], expectedOutput: .stopRecording, expectedIsMatched: false),
+            ]
+        )
+    }
+
+    @Test
+    func singleTapToggle_startsOnPress_modifierOnly() throws {
+        runScenario(
+            hotkey: HotKey(key: nil, modifiers: [.option]),
+            recordingMode: .singleTap,
+            steps: [
+                ScenarioStep(time: 0.0, key: nil, modifiers: [.option], expectedOutput: .startRecording, expectedIsMatched: true, expectedState: .doubleTapLock),
+            ]
+        )
+    }
+
+    @Test
+    func singleTapToggle_staysRecordingOnRelease_modifierOnly() throws {
+        runScenario(
+            hotkey: HotKey(key: nil, modifiers: [.option]),
+            recordingMode: .singleTap,
+            steps: [
+                ScenarioStep(time: 0.0, key: nil, modifiers: [.option], expectedOutput: .startRecording, expectedIsMatched: true),
+                ScenarioStep(time: 0.1, key: nil, modifiers: [], expectedOutput: nil, expectedIsMatched: true, expectedState: .doubleTapLock),
+            ]
+        )
+    }
+
+    @Test
+    func singleTapToggle_stopsOnSecondPress_modifierOnly() throws {
+        runScenario(
+            hotkey: HotKey(key: nil, modifiers: [.option]),
+            recordingMode: .singleTap,
+            steps: [
+                ScenarioStep(time: 0.0, key: nil, modifiers: [.option], expectedOutput: .startRecording, expectedIsMatched: true),
+                ScenarioStep(time: 0.1, key: nil, modifiers: [], expectedOutput: nil, expectedIsMatched: true),
+                ScenarioStep(time: 1.0, key: nil, modifiers: [.option], expectedOutput: .stopRecording, expectedIsMatched: false),
+            ]
+        )
+    }
+
+    @Test
+    func singleTapToggle_escapeCancels() throws {
+        runScenario(
+            hotkey: HotKey(key: .semicolon, modifiers: [.control]),
+            recordingMode: .singleTap,
+            steps: [
+                ScenarioStep(time: 0.0, key: .semicolon, modifiers: [.control], expectedOutput: .startRecording, expectedIsMatched: true),
+                ScenarioStep(time: 0.1, key: nil, modifiers: [], expectedOutput: nil, expectedIsMatched: true),
+                ScenarioStep(time: 1.0, key: .escape, modifiers: [], expectedOutput: .cancel, expectedIsMatched: false),
             ]
         )
     }
@@ -638,7 +726,7 @@ struct ScenarioStep {
 
 func runScenario(
     hotkey: HotKey,
-    useDoubleTapOnly: Bool = false,
+    recordingMode: RecordingMode = .doubleTap,
     doubleTapLockEnabled: Bool = true,
     steps: [ScenarioStep]
 ) {
@@ -654,7 +742,7 @@ func runScenario(
     } operation: {
         HotKeyProcessor(
             hotkey: hotkey,
-            useDoubleTapOnly: useDoubleTapOnly,
+            recordingMode: recordingMode,
             doubleTapLockEnabled: doubleTapLockEnabled
         )
     }
@@ -793,7 +881,7 @@ struct MouseClickTests {
         var processor = withDependencies {
             $0.date.now = Date(timeIntervalSince1970: 0)
         } operation: {
-            HotKeyProcessor(hotkey: HotKey(key: nil, modifiers: [.option]), minimumKeyTime: 0.15)
+            HotKeyProcessor(hotkey: HotKey(key: nil, modifiers: [.option]), recordingMode: .doubleTap, minimumKeyTime: 0.15)
         }
         
         // Start recording with modifier-only hotkey
@@ -818,7 +906,7 @@ struct MouseClickTests {
         var processor = withDependencies {
             $0.date.now = Date(timeIntervalSince1970: 0)
         } operation: {
-            HotKeyProcessor(hotkey: HotKey(key: nil, modifiers: [.option]), minimumKeyTime: 0.15)
+            HotKeyProcessor(hotkey: HotKey(key: nil, modifiers: [.option]), recordingMode: .doubleTap, minimumKeyTime: 0.15)
         }
         
         // Start recording with modifier-only hotkey
@@ -843,7 +931,7 @@ struct MouseClickTests {
         var processor = withDependencies {
             $0.date.now = Date(timeIntervalSince1970: 0)
         } operation: {
-            HotKeyProcessor(hotkey: HotKey(key: nil, modifiers: [.option]), minimumKeyTime: 0.15)
+            HotKeyProcessor(hotkey: HotKey(key: nil, modifiers: [.option]), recordingMode: .doubleTap, minimumKeyTime: 0.15)
         }
         
         // First tap
@@ -887,7 +975,7 @@ struct MouseClickTests {
         var processor = withDependencies {
             $0.date.now = Date(timeIntervalSince1970: 0)
         } operation: {
-            HotKeyProcessor(hotkey: HotKey(key: .a, modifiers: [.command]), minimumKeyTime: 0.15)
+            HotKeyProcessor(hotkey: HotKey(key: .a, modifiers: [.command]), recordingMode: .doubleTap, minimumKeyTime: 0.15)
         }
         
         // Start recording with key+modifier hotkey
@@ -912,7 +1000,7 @@ struct MouseClickTests {
         var processor = withDependencies {
             $0.date.now = Date(timeIntervalSince1970: 0)
         } operation: {
-            HotKeyProcessor(hotkey: HotKey(key: nil, modifiers: [.option]), minimumKeyTime: 0.5)
+            HotKeyProcessor(hotkey: HotKey(key: nil, modifiers: [.option]), recordingMode: .doubleTap, minimumKeyTime: 0.5)
         }
         
         // Start recording with modifier-only hotkey

@@ -94,9 +94,10 @@ public struct HotKeyProcessor {
     /// The hotkey combination to detect (key + modifiers)
     public var hotkey: HotKey
     
-    /// If true, only double-tap activates recording (press-and-hold disabled)
-    /// Only applies to key+modifier hotkeys; modifier-only always allows press-and-hold
-    public var useDoubleTapOnly: Bool = false
+    /// Recording activation mode:
+    /// - `.singleTap`: Toggle — tap to start, tap again to stop
+    /// - `.doubleTap`: Hold-to-record + double-tap lock
+    public var recordingMode: RecordingMode = .singleTap
 
     /// If false, the quick double-tap lock gesture is disabled.
     /// Press-and-hold still works normally.
@@ -133,17 +134,17 @@ public struct HotKeyProcessor {
     /// Creates a new hotkey processor
     /// - Parameters:
     ///   - hotkey: The key combination to detect
-    ///   - useDoubleTapOnly: If true, disables press-and-hold for key+modifier hotkeys
+    ///   - recordingMode: Toggle vs hold-to-record behaviour
     ///   - doubleTapLockEnabled: If false, disables double-tap lock behavior
     ///   - minimumKeyTime: Minimum duration for valid key press (overridden to modifierOnlyMinimumDuration for modifier-only)
     public init(
         hotkey: HotKey,
-        useDoubleTapOnly: Bool = false,
+        recordingMode: RecordingMode = .singleTap,
         doubleTapLockEnabled: Bool = true,
         minimumKeyTime: TimeInterval = HexCoreConstants.defaultMinimumKeyTime
     ) {
         self.hotkey = hotkey
-        self.useDoubleTapOnly = useDoubleTapOnly
+        self.recordingMode = recordingMode
         self.doubleTapLockEnabled = doubleTapLockEnabled
         self.minimumKeyTime = minimumKeyTime
     }
@@ -289,14 +290,10 @@ public extension HotKeyProcessor {
 // MARK: - Core Logic
 
 extension HotKeyProcessor {
-    private var isDoubleTapOnlyEnabledForCurrentHotkey: Bool {
-        useDoubleTapOnly && doubleTapLockEnabled && hotkey.key != nil
-    }
-
     /// Handles keyboard events that match the configured hotkey.
     ///
-    /// # State Transitions
-    /// - `.idle` → `.pressAndHold`: Start new recording (unless useDoubleTapOnly mode)
+    /// # State Transitions (doubleTap mode)
+    /// - `.idle` → `.pressAndHold`: Start new recording
     /// - `.pressAndHold` → no change: Already recording, ignore
     /// - `.doubleTapLock` → `.idle`: User pressed hotkey to stop locked recording
     ///
@@ -309,14 +306,13 @@ extension HotKeyProcessor {
     private mutating func handleMatchingChord() -> Output? {
         switch state {
         case .idle:
-            // If doubleTapOnly mode is enabled and the hotkey has a key component,
-            // we want to delay starting recording until we see the double-tap
-            if isDoubleTapOnlyEnabledForCurrentHotkey {
-                // Record the timestamp but don't start recording
-                lastTapAt = now
-                return nil
+            if recordingMode == .singleTap {
+                // Toggle mode: go straight to doubleTapLock
+                // (release will be ignored; next press stops)
+                state = .doubleTapLock
+                return .startRecording
             } else {
-                // Normal press => .pressAndHold => .startRecording
+                // Hold mode: normal press-and-hold
                 state = .pressAndHold(startTime: now)
                 return .startRecording
             }
@@ -355,22 +351,6 @@ extension HotKeyProcessor {
     private mutating func handleNonmatchingChord(_ e: KeyEvent) -> Output? {
         switch state {
         case .idle:
-            // Handle double-tap detection for key+modifier combinations
-            if isDoubleTapOnlyEnabledForCurrentHotkey &&
-               chordIsFullyReleased(e) &&
-               lastTapAt != nil {
-                // If we've seen a tap recently, and now we see a full release, and we're in idle state
-                // Check if the time between taps is within the threshold
-                if let prevTapTime = lastTapAt,
-                   now.timeIntervalSince(prevTapTime) < Self.doubleTapThreshold {
-                    // This is the second tap - activate recording in double-tap lock mode
-                    state = .doubleTapLock
-                    return .startRecording
-                }
-                
-                // Reset the tap timer as we've fully released
-                lastTapAt = nil
-            }
             return nil
 
         case let .pressAndHold(startTime):
@@ -423,12 +403,7 @@ extension HotKeyProcessor {
             }
 
         case .doubleTapLock:
-            // For key+modifier combinations in doubleTapLock mode, require full key release to stop
-            if isDoubleTapOnlyEnabledForCurrentHotkey && chordIsFullyReleased(e) {
-                resetToIdle()
-                return .stopRecording
-            }
-            // Otherwise, if locked, ignore everything except chord == hotkey => stop
+            // Locked: ignore everything; only hotkey press stops (handled in handleMatchingChord)
             return nil
         }
     }

@@ -188,9 +188,8 @@ private extension TranscriptionFeature {
 
         // Always keep hotKeyProcessor in sync with current user hotkey preference
         hotKeyProcessor.hotkey = hexSettings.hotkey
-        let useDoubleTapOnly = hexSettings.doubleTapLockEnabled && hexSettings.useDoubleTapOnly
+        hotKeyProcessor.recordingMode = hexSettings.recordingMode
         hotKeyProcessor.doubleTapLockEnabled = hexSettings.doubleTapLockEnabled
-        hotKeyProcessor.useDoubleTapOnly = useDoubleTapOnly
         hotKeyProcessor.minimumKeyTime = hexSettings.minimumKeyTime
 
         switch inputEvent {
@@ -212,13 +211,15 @@ private extension TranscriptionFeature {
             } else {
               Task { await send(.hotKeyPressed) }
             }
-            // If the hotkey is purely modifiers, return false to keep it from interfering with normal usage
-            // But if useDoubleTapOnly is true, always intercept the key
-            return useDoubleTapOnly || keyEvent.key != nil
+            // Intercept if the hotkey has a key component to prevent
+            // the character from leaking into the active app
+            return keyEvent.key != nil
 
           case .stopRecording:
             Task { await send(.hotKeyReleased) }
-            return false // or `true` if you want to intercept
+            // Intercept if the key matches the hotkey to prevent character leak
+            return keyEvent.key != nil
+                && keyEvent.key == hotKeyProcessor.hotkey.key
 
           case .cancel:
             Task { await send(.cancel) }
