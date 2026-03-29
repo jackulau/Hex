@@ -9,7 +9,7 @@ struct LiveTranscriptionDeltaTests {
 	func firstTickPastesAllButLastWord() {
 		var delta = LiveTranscriptionDelta()
 		let result = delta.computeDelta(from: "Hello my name is Jack")
-		#expect(result.textToPaste == "Hello my name is")
+		#expect(result.textToPaste == "Hello my name is ")
 		#expect(result.hasNewContent == true)
 		#expect(delta.pastedWordCount == 4)
 		#expect(delta.heldBackWord == "Jack")
@@ -38,7 +38,7 @@ struct LiveTranscriptionDeltaTests {
 		var delta = LiveTranscriptionDelta()
 		_ = delta.computeDelta(from: "Hello")
 		let result = delta.computeDelta(from: "Hello")
-		#expect(result.textToPaste == "Hello")
+		#expect(result.textToPaste == "Hello ")
 		#expect(delta.pastedWordCount == 1)
 		#expect(delta.heldBackWord == nil)
 	}
@@ -51,19 +51,19 @@ struct LiveTranscriptionDeltaTests {
 
 		// Tick 1: "Hello my"
 		let r1 = delta.computeDelta(from: "Hello my")
-		#expect(r1.textToPaste == "Hello")
+		#expect(r1.textToPaste == "Hello ")
 		#expect(delta.pastedWordCount == 1)
 		#expect(delta.heldBackWord == "my")
 
 		// Tick 2: "Hello my name is"
 		let r2 = delta.computeDelta(from: "Hello my name is")
-		#expect(r2.textToPaste == " my name")
+		#expect(r2.textToPaste == "my name ")
 		#expect(delta.pastedWordCount == 3)
 		#expect(delta.heldBackWord == "is")
 
 		// Tick 3: "Hello my name is Jack"
 		let r3 = delta.computeDelta(from: "Hello my name is Jack")
-		#expect(r3.textToPaste == " is")
+		#expect(r3.textToPaste == "is ")
 		#expect(delta.pastedWordCount == 4)
 		#expect(delta.heldBackWord == "Jack")
 	}
@@ -76,12 +76,12 @@ struct LiveTranscriptionDeltaTests {
 
 		// Tick 1: "I like ham" — holds back "ham"
 		let r1 = delta.computeDelta(from: "I like ham")
-		#expect(r1.textToPaste == "I like")
+		#expect(r1.textToPaste == "I like ")
 		#expect(delta.heldBackWord == "ham")
 
 		// Tick 2: "I like hamburgers and" — "ham" changed to "hamburgers", holds back "and"
 		let r2 = delta.computeDelta(from: "I like hamburgers and")
-		#expect(r2.textToPaste == " hamburgers")
+		#expect(r2.textToPaste == "hamburgers ")
 		#expect(delta.pastedWordCount == 3)
 		#expect(delta.heldBackWord == "and")
 	}
@@ -96,14 +96,13 @@ struct LiveTranscriptionDeltaTests {
 
 		// Tick 2: "I like hamburgers" — "ham" became "hamburgers", new hold-back
 		let r2 = delta.computeDelta(from: "I like hamburgers")
-		// "hamburgers" is the new last word, different from "ham", so held back
 		#expect(r2.textToPaste == "")
 		#expect(delta.heldBackWord == "hamburgers")
 		#expect(delta.pastedWordCount == 2)
 
 		// Tick 3: "I like hamburgers and" — "hamburgers" confirmed, paste it
 		let r3 = delta.computeDelta(from: "I like hamburgers and")
-		#expect(r3.textToPaste == " hamburgers")
+		#expect(r3.textToPaste == "hamburgers ")
 		#expect(delta.pastedWordCount == 3)
 		#expect(delta.heldBackWord == "and")
 	}
@@ -112,13 +111,12 @@ struct LiveTranscriptionDeltaTests {
 	func stableLastWordPastedImmediately() {
 		var delta = LiveTranscriptionDelta()
 
-		// Tick 1
 		_ = delta.computeDelta(from: "Hello world")
 		#expect(delta.heldBackWord == "world")
 
 		// Tick 2: same last word "world" — it's stable, paste it
 		let r2 = delta.computeDelta(from: "Hello world")
-		#expect(r2.textToPaste == " world")
+		#expect(r2.textToPaste == "world ")
 		#expect(delta.pastedWordCount == 2)
 		#expect(delta.heldBackWord == nil)
 	}
@@ -132,11 +130,10 @@ struct LiveTranscriptionDeltaTests {
 		_ = delta.computeDelta(from: "Hello my name is Jack")
 		#expect(delta.pastedWordCount == 4)
 
-		// Shorter result (model correction) — should not paste
 		let r2 = delta.computeDelta(from: "Hello my name")
 		#expect(r2.textToPaste == "")
 		#expect(r2.hasNewContent == false)
-		#expect(delta.pastedWordCount == 4) // unchanged
+		#expect(delta.pastedWordCount == 4)
 	}
 
 	// MARK: - Final Delta
@@ -146,12 +143,10 @@ struct LiveTranscriptionDeltaTests {
 		var delta = LiveTranscriptionDelta()
 
 		_ = delta.computeDelta(from: "Hello my name is Jack")
-		// Pasted "Hello my name is", holding back "Jack"
 		#expect(delta.pastedWordCount == 4)
 
-		let finalText = "Hello my name is Jack Lau"
-		let finalResult = delta.computeFinalDelta(from: finalText)
-		#expect(finalResult == " Jack Lau")
+		let finalResult = delta.computeFinalDelta(from: "Hello my name is Jack Lau")
+		#expect(finalResult == "Jack Lau")
 	}
 
 	@Test
@@ -165,7 +160,7 @@ struct LiveTranscriptionDeltaTests {
 	func finalDeltaWithEverythingPastedReturnsEmpty() {
 		var delta = LiveTranscriptionDelta()
 		_ = delta.computeDelta(from: "Hello world")
-		_ = delta.computeDelta(from: "Hello world") // confirms "world"
+		_ = delta.computeDelta(from: "Hello world")
 		#expect(delta.pastedWordCount == 2)
 
 		let result = delta.computeFinalDelta(from: "Hello world")
@@ -192,7 +187,7 @@ struct LiveTranscriptionDeltaTests {
 		#expect(delta.heldBackWord == "world")
 
 		let flushed = delta.flushHeldBackWord()
-		#expect(flushed == " world")
+		#expect(flushed == "world")
 		#expect(delta.heldBackWord == nil)
 		#expect(delta.pastedWordCount == 2)
 	}
@@ -208,13 +203,11 @@ struct LiveTranscriptionDeltaTests {
 	func flushThenFinalDeltaDoesNotRepeat() {
 		var delta = LiveTranscriptionDelta()
 		_ = delta.computeDelta(from: "Hello my name is Jack")
-		// pastedWordCount=4, heldBack="Jack"
 
 		let flushed = delta.flushHeldBackWord()
-		#expect(flushed == " Jack")
+		#expect(flushed == "Jack")
 		#expect(delta.pastedWordCount == 5)
 
-		// Final delta should have nothing left
 		let final = delta.computeFinalDelta(from: "Hello my name is Jack")
 		#expect(final == "")
 	}
@@ -223,11 +216,10 @@ struct LiveTranscriptionDeltaTests {
 	func flushThenFinalDeltaOnlyPastesNewContent() {
 		var delta = LiveTranscriptionDelta()
 		_ = delta.computeDelta(from: "Hello my name is Jack")
-		_ = delta.flushHeldBackWord() // pastes "Jack"
+		_ = delta.flushHeldBackWord()
 
-		// Final transcription has more words
 		let final = delta.computeFinalDelta(from: "Hello my name is Jack Lau")
-		#expect(final == " Lau")
+		#expect(final == "Lau")
 	}
 
 	// MARK: - Edge Cases
@@ -244,7 +236,7 @@ struct LiveTranscriptionDeltaTests {
 	func multipleSpacesAreTreatedAsOne() {
 		var delta = LiveTranscriptionDelta()
 		let result = delta.computeDelta(from: "Hello   world   test")
-		#expect(result.textToPaste == "Hello world")
+		#expect(result.textToPaste == "Hello world ")
 		#expect(delta.pastedWordCount == 2)
 	}
 
@@ -252,24 +244,26 @@ struct LiveTranscriptionDeltaTests {
 	func leadingAndTrailingSpaces() {
 		var delta = LiveTranscriptionDelta()
 		let result = delta.computeDelta(from: "  Hello world  ")
-		#expect(result.textToPaste == "Hello")
+		#expect(result.textToPaste == "Hello ")
 		#expect(delta.pastedWordCount == 1)
 	}
 
 	@Test
-	func noSpacePrefixOnFirstPaste() {
+	func trailingSpaceOnIntermediatePaste() {
 		var delta = LiveTranscriptionDelta()
 		let result = delta.computeDelta(from: "Hello world test")
-		#expect(result.textToPaste == "Hello world")
-		// No leading space on first paste
+		// Trailing space, no leading space
+		#expect(result.textToPaste == "Hello world ")
+		#expect(result.textToPaste.last == " ")
 		#expect(result.textToPaste.first != " ")
 	}
 
 	@Test
-	func spacePrefixOnSubsequentPaste() {
+	func noTrailingSpaceOnFinalPaste() {
 		var delta = LiveTranscriptionDelta()
 		_ = delta.computeDelta(from: "Hello world")
-		let r2 = delta.computeDelta(from: "Hello world test more")
-		#expect(r2.textToPaste.first == " ")
+		let final = delta.computeFinalDelta(from: "Hello world done")
+		#expect(final == "world done")
+		#expect(final.last != " ")
 	}
 }

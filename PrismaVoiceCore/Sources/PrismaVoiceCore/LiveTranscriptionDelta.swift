@@ -51,8 +51,10 @@ public struct LiveTranscriptionDelta {
 		}
 
 		let newWords = words[pastedWordCount..<safeWordCount]
-		let prefix = pastedWordCount > 0 ? " " : ""
-		let delta = prefix + newWords.joined(separator: " ")
+		// Use trailing space so cursor is ready for next word.
+		// Leading spaces get dropped by some clipboard paste mechanisms.
+		let suffix = " "
+		let delta = newWords.joined(separator: " ") + suffix
 		pastedWordCount = safeWordCount
 
 		return Result(textToPaste: delta, hasNewContent: true)
@@ -67,8 +69,8 @@ public struct LiveTranscriptionDelta {
 		let words = text.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
 		guard words.count > pastedWordCount else { return "" }
 		let remaining = words[pastedWordCount...]
-		let prefix = pastedWordCount > 0 ? " " : ""
-		return prefix + remaining.joined(separator: " ")
+		// No trailing space on final paste
+		return remaining.joined(separator: " ")
 	}
 
 	/// Flush the held-back word immediately (e.g., on key release).
@@ -77,8 +79,8 @@ public struct LiveTranscriptionDelta {
 		guard let word = heldBackWord else { return "" }
 		heldBackWord = nil
 		pastedWordCount += 1
-		let prefix = pastedWordCount > 1 ? " " : ""
-		return prefix + word
+		// No trailing space on flush (final word)
+		return word
 	}
 
 	/// Reset state for a new recording session.
