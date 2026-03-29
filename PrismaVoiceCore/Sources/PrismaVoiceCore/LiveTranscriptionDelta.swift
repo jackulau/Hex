@@ -16,6 +16,10 @@ public struct LiveTranscriptionDelta {
 		public let textToPaste: String
 		/// Whether any new words were found (even if held back).
 		public let hasNewContent: Bool
+		/// Whether a space separator should be typed before pasting this delta.
+		/// The space must be typed as a keystroke, not included in the paste text,
+		/// because clipboard paste strips leading/trailing whitespace.
+		public let needsLeadingSpace: Bool
 	}
 
 	/// Compute the delta between previously pasted words and new transcription text.
@@ -30,7 +34,7 @@ public struct LiveTranscriptionDelta {
 		let words = text.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
 
 		guard words.count > pastedWordCount else {
-			return Result(textToPaste: "", hasNewContent: false)
+			return Result(textToPaste: "", hasNewContent: false, needsLeadingSpace: false)
 		}
 
 		let lastWord = words.last ?? ""
@@ -47,17 +51,15 @@ public struct LiveTranscriptionDelta {
 		}
 
 		guard safeWordCount > pastedWordCount else {
-			return Result(textToPaste: "", hasNewContent: true)
+			return Result(textToPaste: "", hasNewContent: true, needsLeadingSpace: false)
 		}
 
 		let newWords = words[pastedWordCount..<safeWordCount]
-		// Use trailing space so cursor is ready for next word.
-		// Leading spaces get dropped by some clipboard paste mechanisms.
-		let suffix = " "
-		let delta = newWords.joined(separator: " ") + suffix
+		let needsLeadingSpace = pastedWordCount > 0
+		let delta = newWords.joined(separator: " ")
 		pastedWordCount = safeWordCount
 
-		return Result(textToPaste: delta, hasNewContent: true)
+		return Result(textToPaste: delta, hasNewContent: true, needsLeadingSpace: needsLeadingSpace)
 	}
 
 	/// Compute the final delta for the complete transcription after recording stops.

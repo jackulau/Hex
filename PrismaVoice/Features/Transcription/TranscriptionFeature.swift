@@ -378,10 +378,15 @@ private extension TranscriptionFeature {
 
     // Immediately paste any held-back word so the user sees it without waiting
     // for the final transcription pass.
+    let flushNeedsSpace = state.liveTranscriptionDelta.pastedWordCount > 0
     let flushedWord = state.prismaVoiceSettings.liveTranscriptionEnabled
       ? state.liveTranscriptionDelta.flushHeldBackWord()
       : ""
     let flushEffect: Effect<Action> = flushedWord.isEmpty ? .none : .run { [pasteboard] _ in
+      if flushNeedsSpace {
+        await pasteboard.sendKeyboardCommand(.space)
+        try? await Task.sleep(for: .milliseconds(30))
+      }
       await pasteboard.paste(flushedWord)
     }
 
@@ -678,8 +683,14 @@ private extension TranscriptionFeature {
     let result = state.liveTranscriptionDelta.computeDelta(from: modifiedText)
     guard !result.textToPaste.isEmpty else { return .none }
     let delta = result.textToPaste
+    let needsSpace = result.needsLeadingSpace
 
     return .run { [pasteboard] _ in
+      // Type space as a keystroke (not clipboard) to avoid whitespace stripping
+      if needsSpace {
+        await pasteboard.sendKeyboardCommand(.space)
+        try? await Task.sleep(for: .milliseconds(30))
+      }
       await pasteboard.paste(delta)
     }
   }

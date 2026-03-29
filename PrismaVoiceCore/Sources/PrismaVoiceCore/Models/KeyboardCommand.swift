@@ -27,6 +27,9 @@ public struct KeyboardCommand: Codable, Equatable, Sendable {
 	
 	// MARK: - Common Presets
 	
+	/// Space key
+	public static let space = KeyboardCommand(key: .space)
+
 	/// Plain Enter key
 	public static let enter = KeyboardCommand(key: .return)
 	
