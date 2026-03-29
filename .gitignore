@@ -22,3 +22,4 @@ node_modules/
 # Claude
 .claude/
 build-release/
+PrismaVoiceCore/.build/

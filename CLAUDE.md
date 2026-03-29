@@ -1,25 +1,25 @@
-# Hex – Dev Notes for Agents
+# PrismaVoice – Dev Notes for Agents
 
 This file provides guidance for coding agents working in this repo.
 
 ## Project Overview
 
-Hex is a macOS menu bar application for on‑device voice‑to‑text. It supports Whisper (Core ML via WhisperKit) and Parakeet TDT v3 (Core ML via FluidAudio). Users activate transcription with hotkeys; text can be auto‑pasted into the active app.
+PrismaVoice is a macOS menu bar application for on‑device voice‑to‑text. It supports Whisper (Core ML via WhisperKit) and Parakeet TDT v3 (Core ML via FluidAudio). Users activate transcription with hotkeys; text can be auto‑pasted into the active app.
 
 ## Build & Development Commands
 
 ```bash
 # Build the app
-xcodebuild -scheme Hex -configuration Release
+xcodebuild -scheme PrismaVoice -configuration Release
 
-# Run tests (must be run from HexCore directory for unit tests)
-cd HexCore && swift test
+# Run tests (must be run from PrismaVoiceCore directory for unit tests)
+cd PrismaVoiceCore && swift test
 
 # Or run all tests via Xcode
-xcodebuild test -scheme Hex
+xcodebuild test -scheme PrismaVoice
 
 # Open in Xcode (recommended for development)
-open Hex.xcodeproj
+open PrismaVoice.xcodeproj
 ```
 
 ## Architecture
@@ -54,15 +54,15 @@ The app uses **The Composable Architecture (TCA)** for state management. Key arc
    - Mouse clicks and extra modifiers are discarded within threshold, ignored after
    - Only ESC cancels recordings after the threshold
 
-2. **Model Management**: Models are managed by `ModelDownloadFeature`. Curated defaults live in `Hex/Resources/Data/models.json`. The Settings UI shows a compact opinionated list (Parakeet + three Whisper sizes). No dropdowns.
+2. **Model Management**: Models are managed by `ModelDownloadFeature`. Curated defaults live in `PrismaVoice/Resources/Data/models.json`. The Settings UI shows a compact opinionated list (Parakeet + three Whisper sizes). No dropdowns.
 
 3. **Sound Effects**: Audio feedback is provided via `SoundEffect.swift` using files in `Resources/Audio/`
 
 4. **Window Management**: Uses an `InvisibleWindow` for the transcription indicator overlay
 
-5. **Permissions**: Requires audio input and automation entitlements (see `Hex.entitlements`)
+5. **Permissions**: Requires audio input and automation entitlements (see `PrismaVoice.entitlements`)
 
-6. **Logging**: All diagnostics should use the unified logging helper `HexLog` (`HexCore/Sources/HexCore/Logging.swift`). Pick an existing category (e.g., `.transcription`, `.recording`, `.settings`) or add a new case so Console predicates stay consistent. Avoid `print` and prefer privacy annotations (`, privacy: .private`) for anything potentially sensitive like transcript text or file paths.
+6. **Logging**: All diagnostics should use the unified logging helper `PrismaVoiceLog` (`PrismaVoiceCore/Sources/PrismaVoiceCore/Logging.swift`). Pick an existing category (e.g., `.transcription`, `.recording`, `.settings`) or add a new case so Console predicates stay consistent. Avoid `print` and prefer privacy annotations (`, privacy: .private`) for anything potentially sensitive like transcript text or file paths.
 
 ## Models (2025‑11)
 
@@ -73,10 +73,10 @@ The app uses **The Composable Architecture (TCA)** for state management. Key arc
 ### Storage Locations
 
 - WhisperKit models
-  - `~/Library/Application Support/com.kitlangton.Hex/models/argmaxinc/whisperkit-coreml/<model>`
+  - `~/Library/Application Support/com.kitlangton.PrismaVoice/models/argmaxinc/whisperkit-coreml/<model>`
 - Parakeet (FluidAudio)
   - We set `XDG_CACHE_HOME` on launch so Parakeet caches under the app container:
-  - `~/Library/Containers/com.kitlangton.Hex/Data/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml`
+  - `~/Library/Containers/com.kitlangton.PrismaVoice/Data/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml`
   - Legacy `~/.cache/fluidaudio/Models/…` is not visible to the sandbox; re‑download or import.
 
 ### Progress + Availability
@@ -92,7 +92,7 @@ The app uses **The Composable Architecture (TCA)** for state management. Key arc
 ### Packages
 
 - WhisperKit: `https://github.com/argmaxinc/WhisperKit`
-- FluidAudio: `https://github.com/FluidInference/FluidAudio.git` (link `FluidAudio` to Hex target)
+- FluidAudio: `https://github.com/FluidInference/FluidAudio.git` (link `FluidAudio` to PrismaVoice target)
 
 ### Entitlements (Sandbox)
 
@@ -106,7 +106,7 @@ The app uses **The Composable Architecture (TCA)** for state management. Key arc
 Set at app launch and logged:
 
 ```
-XDG_CACHE_HOME = ~/Library/Containers/com.kitlangton.Hex/Data/Library/Application Support/com.kitlangton.Hex/cache
+XDG_CACHE_HOME = ~/Library/Containers/com.kitlangton.PrismaVoice/Data/Library/Application Support/com.kitlangton.PrismaVoice/cache
 ```
 
 FluidAudio models reside under `Application Support/FluidAudio/Models`.
@@ -120,7 +120,7 @@ FluidAudio models reside under `Application Support/FluidAudio/Models`.
 
 - Repeated mic prompts during debug: ensure Debug signing uses "Apple Development" so TCC sticks
 - Sandbox network errors (‑1003): add `com.apple.security.network.client = true` (already set)
-- Parakeet not detected: ensure it resides under the container path above; downloading from Hex places it correctly.
+- Parakeet not detected: ensure it resides under the container path above; downloading from PrismaVoice places it correctly.
 
 ## Changelog Workflow Expectations
 
@@ -131,7 +131,7 @@ FluidAudio models reside under `Application Support/FluidAudio/Models`.
    bun run changeset:add-ai minor "Add new feature"
    bun run changeset:add-ai major "Breaking change"
    ```
-3. **Only create changesets, don't process them:** Agents should only create changeset fragments. The release tool is responsible for running `changeset version` to collect changesets into `CHANGELOG.md` and syncing to `Hex/Resources/changelog.md`.
+3. **Only create changesets, don't process them:** Agents should only create changeset fragments. The release tool is responsible for running `changeset version` to collect changesets into `CHANGELOG.md` and syncing to `PrismaVoice/Resources/changelog.md`.
 4. **Reference GitHub issues:** When a change addresses a filed issue, link it in code comments and the changeset entry (`(#123)`) so release notes and Sparkle updates point users back to the discussion. If the work should close an issue, include "Fixes #123" (or "Closes #123") in the commit or PR description so GitHub auto-closes it once merged.
 
 ## Git Commit Messages
@@ -181,7 +181,7 @@ Releases are automated via a local CLI tool that handles building, signing, nota
 
 1. Checks for clean working tree
 2. Finds pending changesets and applies them (bumps version in `package.json`)
-3. Syncs changelog to `Hex/Resources/changelog.md`
+3. Syncs changelog to `PrismaVoice/Resources/changelog.md`
 4. Updates `Info.plist` and `project.pbxproj` with new version
 5. Increments build number
 6. Cleans DerivedData and archives with xcodebuild
@@ -203,8 +203,8 @@ The tool will prompt you to either:
 ### Artifacts
 
 Each release produces:
-- `Hex-{version}.dmg` - Signed, notarized DMG
-- `Hex-{version}.zip` - For Homebrew cask
+- `PrismaVoice-{version}.dmg` - Signed, notarized DMG
+- `PrismaVoice-{version}.zip` - For Homebrew cask
 - `hex-latest.dmg` - Always points to latest
 - `appcast.xml` - Sparkle update feed
 
