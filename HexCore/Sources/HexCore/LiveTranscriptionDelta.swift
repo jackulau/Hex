@@ -71,6 +71,16 @@ public struct LiveTranscriptionDelta {
 		return prefix + remaining.joined(separator: " ")
 	}
 
+	/// Flush the held-back word immediately (e.g., on key release).
+	/// Returns the word with a leading space if there's prior pasted content.
+	public mutating func flushHeldBackWord() -> String {
+		guard let word = heldBackWord else { return "" }
+		heldBackWord = nil
+		pastedWordCount += 1
+		let prefix = pastedWordCount > 1 ? " " : ""
+		return prefix + word
+	}
+
 	/// Reset state for a new recording session.
 	public mutating func reset() {
 		pastedWordCount = 0

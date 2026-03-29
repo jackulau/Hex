@@ -183,6 +183,53 @@ struct LiveTranscriptionDeltaTests {
 		#expect(delta.heldBackWord == nil)
 	}
 
+	// MARK: - Flush Held-Back Word
+
+	@Test
+	func flushHeldBackWordReturnsIt() {
+		var delta = LiveTranscriptionDelta()
+		_ = delta.computeDelta(from: "Hello world")
+		#expect(delta.heldBackWord == "world")
+
+		let flushed = delta.flushHeldBackWord()
+		#expect(flushed == " world")
+		#expect(delta.heldBackWord == nil)
+		#expect(delta.pastedWordCount == 2)
+	}
+
+	@Test
+	func flushWithNothingHeldBackReturnsEmpty() {
+		var delta = LiveTranscriptionDelta()
+		let flushed = delta.flushHeldBackWord()
+		#expect(flushed == "")
+	}
+
+	@Test
+	func flushThenFinalDeltaDoesNotRepeat() {
+		var delta = LiveTranscriptionDelta()
+		_ = delta.computeDelta(from: "Hello my name is Jack")
+		// pastedWordCount=4, heldBack="Jack"
+
+		let flushed = delta.flushHeldBackWord()
+		#expect(flushed == " Jack")
+		#expect(delta.pastedWordCount == 5)
+
+		// Final delta should have nothing left
+		let final = delta.computeFinalDelta(from: "Hello my name is Jack")
+		#expect(final == "")
+	}
+
+	@Test
+	func flushThenFinalDeltaOnlyPastesNewContent() {
+		var delta = LiveTranscriptionDelta()
+		_ = delta.computeDelta(from: "Hello my name is Jack")
+		_ = delta.flushHeldBackWord() // pastes "Jack"
+
+		// Final transcription has more words
+		let final = delta.computeFinalDelta(from: "Hello my name is Jack Lau")
+		#expect(final == " Lau")
+	}
+
 	// MARK: - Edge Cases
 
 	@Test

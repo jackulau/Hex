@@ -385,6 +385,15 @@ private extension TranscriptionFeature {
       )
     }
 
+    // Immediately paste any held-back word so the user sees it without waiting
+    // for the final transcription pass.
+    let flushedWord = state.hexSettings.liveTranscriptionEnabled
+      ? state.liveTranscriptionDelta.flushHeldBackWord()
+      : ""
+    let flushEffect: Effect<Action> = flushedWord.isEmpty ? .none : .run { [pasteboard] _ in
+      await pasteboard.paste(flushedWord)
+    }
+
     // Otherwise, proceed to transcription
     state.isTranscribing = true
     state.error = nil
@@ -396,6 +405,7 @@ private extension TranscriptionFeature {
     return .merge(
       .cancel(id: CancelID.liveTranscriptionTimer),
       .cancel(id: CancelID.liveTranscriptionSnapshot),
+      flushEffect,
       .run { [sleepManagement] send in
       // Allow system to sleep again
       await sleepManagement.allowSleep()
