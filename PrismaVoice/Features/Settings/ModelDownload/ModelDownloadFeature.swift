@@ -266,6 +266,11 @@ public struct ModelDownloadFeature {
 					availablePlus.insert(ModelInfo(name: model.identifier, isDownloaded: false), at: 0)
 				}
 			}
+			for model in QwenModel.allCases.reversed() {
+				if !availablePlus.contains(where: { $0.name == model.identifier }) {
+					availablePlus.insert(ModelInfo(name: model.identifier, isDownloaded: false), at: 0)
+				}
+			}
 
 			if availablePlus.contains(where: { $0.name == state.preferredParakeetIdentifier }) {
 				state.recommendedModel = state.preferredParakeetIdentifier
