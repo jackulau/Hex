@@ -10,13 +10,12 @@ struct CuratedList: View {
 		if store.showAllModels {
 			return Array(store.curatedModels)
 		} else {
-			// Show only Parakeet by default
-			return store.curatedModels.filter { $0.isParakeet }
+			return store.curatedModels.filter { $0.isFeatured }
 		}
 	}
 
 	private var hiddenModels: [CuratedModelInfo] {
-		store.curatedModels.filter { !$0.isParakeet }
+		store.curatedModels.filter { !$0.isFeatured }
 	}
 
 	var body: some View {

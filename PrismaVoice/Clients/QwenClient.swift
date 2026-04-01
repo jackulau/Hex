@@ -104,7 +104,6 @@ actor QwenClient {
 extension QwenModel {
   var asrVariant: Qwen3AsrVariant {
     switch self {
-    case .standard: return .f32
     case .int8: return .int8
     }
   }

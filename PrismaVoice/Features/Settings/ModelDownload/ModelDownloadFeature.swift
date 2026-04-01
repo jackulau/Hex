@@ -37,22 +37,26 @@ public struct CuratedModelInfo: Equatable, Identifiable, Codable {
 	public var id: String { internalName }
 
 	public var badge: String? {
-		switch parakeetModel {
-		case .englishV2:
-			return "BEST FOR ENGLISH"
-		case .multilingualV3:
-			return "BEST FOR MULTILINGUAL"
-		case nil:
-			return nil
+		if let parakeet = parakeetModel {
+			switch parakeet {
+			case .englishV2: return "BEST FOR ENGLISH"
+			case .multilingualV3: return "BEST FOR MULTILINGUAL"
+			}
 		}
+		if qwenModel != nil { return "MOST ACCURATE" }
+		return nil
 	}
 
 	var parakeetModel: ParakeetModel? {
 		ParakeetModel(rawValue: internalName)
 	}
 
-	var isParakeet: Bool {
-		parakeetModel != nil
+	var qwenModel: QwenModel? {
+		QwenModel(rawValue: internalName)
+	}
+
+	var isFeatured: Bool {
+		parakeetModel != nil || qwenModel != nil
 	}
 
 	public init(
