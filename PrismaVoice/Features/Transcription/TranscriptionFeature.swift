@@ -308,7 +308,11 @@ private extension TranscriptionFeature {
     transcriptionFeatureLogger.notice("Recording started at \(startTime.ISO8601Format())")
 
     // Prevent system sleep during recording
-    let liveTranscriptionEnabled = state.prismaVoiceSettings.liveTranscriptionEnabled
+    // Live transcription only works with fast models (Parakeet). Qwen3 is too slow
+    // for 1-second ticks — it would create a massive backlog.
+    let selectedModel = state.prismaVoiceSettings.selectedModel
+    let isSlowModel = QwenModel(rawValue: selectedModel) != nil
+    let liveTranscriptionEnabled = state.prismaVoiceSettings.liveTranscriptionEnabled && !isSlowModel
     let liveTimerEffect: Effect<Action> = liveTranscriptionEnabled
       ? .run { send in
           try await Task.sleep(for: .seconds(1.5))

@@ -1,4 +1,3 @@
-import AVFoundation
 import Foundation
 import PrismaVoiceCore
 
@@ -57,33 +56,33 @@ actor QwenClient {
     let t0 = Date()
     logger.notice("Transcribing with Qwen3-ASR file=\(url.lastPathComponent)")
 
-    // Read audio samples from file
-    let audioFile = try AVAudioFile(forReading: url)
-    let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
-    let converter = AVAudioConverter(from: audioFile.processingFormat, to: format)
-    let frameCount = AVAudioFrameCount(audioFile.length * Int64(format.sampleRate) / Int64(audioFile.processingFormat.sampleRate))
-    guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-      throw NSError(domain: "Qwen", code: -5, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio buffer"])
+    // Read raw float32 samples from the WAV file
+    // Our recordings are already 16kHz mono float32 from SuperFastCaptureController
+    let data = try Data(contentsOf: url)
+    guard data.count > 44 else {
+      throw NSError(domain: "Qwen", code: -5, userInfo: [NSLocalizedDescriptionKey: "Audio file too small"])
     }
-    if let converter {
-      var error: NSError?
-      let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
-        let readBuffer = AVAudioPCMBuffer(pcmFormat: audioFile.processingFormat, frameCapacity: 4096)!
-        do { try audioFile.read(into: readBuffer) } catch { outStatus.pointee = .endOfStream; return nil }
-        outStatus.pointee = .haveData
-        return readBuffer
+    // Find the data chunk in the WAV (skip header)
+    var dataOffset = 12
+    while dataOffset + 8 <= data.count {
+      let chunkID = String(data: data[dataOffset..<dataOffset + 4], encoding: .ascii) ?? ""
+      if chunkID == "data" {
+        dataOffset += 8
+        break
       }
-      converter.convert(to: buffer, error: &error, withInputFrom: inputBlock)
-    } else {
-      try audioFile.read(into: buffer)
+      let chunkSize: UInt32 = data[dataOffset + 4..<dataOffset + 8].withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
+      dataOffset += 8 + Int(chunkSize)
+      if chunkSize % 2 != 0 { dataOffset += 1 }
     }
-
-    guard let samples = buffer.floatChannelData?[0] else {
-      throw NSError(domain: "Qwen", code: -5, userInfo: [NSLocalizedDescriptionKey: "Failed to read audio samples"])
+    let pcmData = data[dataOffset...]
+    let sampleCount = pcmData.count / MemoryLayout<Float>.size
+    let samples: [Float] = pcmData.withUnsafeBytes { buffer in
+      let floatBuffer = buffer.bindMemory(to: Float.self)
+      return Array(floatBuffer.prefix(sampleCount))
     }
-    let sampleArray = Array(UnsafeBufferPointer(start: samples, count: Int(buffer.frameLength)))
+    logger.info("Qwen3-ASR audio: \(samples.count) samples (\(String(format: "%.2f", Double(samples.count) / 16000.0))s)")
 
-    let text = try await manager.transcribe(audioSamples: sampleArray, language: language)
+    let text = try await manager.transcribe(audioSamples: samples, language: language)
     logger.info("Qwen3-ASR transcription finished in \(String(format: "%.2f", Date().timeIntervalSince(t0)))s")
     return text
   }

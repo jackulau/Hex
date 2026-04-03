@@ -267,7 +267,7 @@ actor TranscriptionClientLive {
       try await downloadAndLoadModel(variant: model) { p in progressCallback(p) }
       transcriptionLogger.info("Qwen3-ASR ensureLoaded took \(String(format: "%.2f", Date().timeIntervalSince(startLoad)))s")
       let startTx = Date()
-      let text = try await qwen.transcribe(url)
+      let text = try await qwen.transcribe(url, language: options.language ?? "en")
       transcriptionLogger.info("Qwen3-ASR transcription took \(String(format: "%.2f", Date().timeIntervalSince(startTx)))s")
       return text
     }

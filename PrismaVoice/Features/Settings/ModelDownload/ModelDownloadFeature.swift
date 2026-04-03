@@ -142,7 +142,12 @@ public struct ModelDownloadFeature {
 		// Convenience computed vars
 		var selectedModel: String { prismaVoiceSettings.selectedModel }
 		var selectedModelIsDownloaded: Bool {
-			availableModels[id: selectedModel]?.isDownloaded ?? false
+			if let model = availableModels[id: selectedModel] {
+				return model.isDownloaded
+			}
+			// Qwen models may not be in availableModels list but can still be loaded on demand
+			if QwenModel(rawValue: selectedModel) != nil { return true }
+			return false
 		}
 
 		var anyModelDownloaded: Bool {
