@@ -318,7 +318,7 @@ private extension TranscriptionFeature {
           try await Task.sleep(for: .seconds(1.5))
           while !Task.isCancelled {
             await send(.liveTranscriptionTick)
-            try await Task.sleep(for: .seconds(1))
+            try await Task.sleep(for: .seconds(3))
           }
         }
         .cancellable(id: CancelID.liveTranscriptionTimer, cancelInFlight: true)

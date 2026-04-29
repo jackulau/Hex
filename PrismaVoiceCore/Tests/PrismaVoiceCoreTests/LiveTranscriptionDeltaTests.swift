@@ -211,4 +211,106 @@ struct LiveTranscriptionDeltaTests {
 		let r2 = delta.computeDelta(from: "Hello world test more words")
 		#expect(r2.needsLeadingSpace == true)
 	}
+
+	// MARK: - Sliding Window
+
+	@Test
+	func slidingWindowContinuesPasting() {
+		var delta = LiveTranscriptionDelta()
+
+		// Buffer fills: "A B C D E"
+		let r1 = delta.computeDelta(from: "A B C D E")
+		#expect(r1.textToPaste == "A B C D")
+		#expect(delta.heldBackWord == "E")
+
+		// Buffer slides: "A" drops, "F" added → "B C D E F"
+		let r2 = delta.computeDelta(from: "B C D E F")
+		#expect(r2.textToPaste == "E")
+		#expect(r2.needsLeadingSpace == true)
+		#expect(delta.heldBackWord == "F")
+
+		// Another slide: "B" drops, "G" added → "C D E F G"
+		let r3 = delta.computeDelta(from: "C D E F G")
+		#expect(r3.textToPaste == "F")
+		#expect(r3.needsLeadingSpace == true)
+		#expect(delta.heldBackWord == "G")
+	}
+
+	@Test
+	func slidingWindowFlushesCorrectly() {
+		var delta = LiveTranscriptionDelta()
+
+		_ = delta.computeDelta(from: "A B C D E")
+		_ = delta.computeDelta(from: "B C D E F")
+
+		let flushed = delta.flushHeldBackWord()
+		#expect(flushed == "F")
+	}
+
+	@Test
+	func slidingWindowFinalDelta() {
+		var delta = LiveTranscriptionDelta()
+
+		_ = delta.computeDelta(from: "A B C D E")
+		// Slide
+		_ = delta.computeDelta(from: "B C D E F")
+		// E got pasted, F held back
+
+		// Final transcription of full audio (not windowed)
+		let final = delta.computeFinalDelta(from: "B C D E F G H")
+		// pastedWordCount is relative to current window, F is held back
+		// Should paste everything after what was confirmed
+		#expect(final.contains("F"))
+		#expect(final.contains("G"))
+		#expect(final.contains("H"))
+	}
+
+	@Test
+	func noSlideWhenFirstWordUnchanged() {
+		var delta = LiveTranscriptionDelta()
+
+		_ = delta.computeDelta(from: "Hello my name is Jack")
+		#expect(delta.pastedWordCount == 4)
+
+		// Model fluctuation — same start, fewer words. Should NOT adjust.
+		let r2 = delta.computeDelta(from: "Hello my name")
+		#expect(r2.textToPaste == "")
+		#expect(r2.hasNewContent == false)
+	}
+
+	@Test
+	func overlapFailureDoesNotRepaste() {
+		var delta = LiveTranscriptionDelta()
+
+		// Build up pasted state
+		_ = delta.computeDelta(from: "the quick brown fox jumps over the lazy dog")
+		#expect(delta.pastedWordCount == 8)
+
+		// Completely different transcription (no overlap). Must NOT re-paste.
+		let r2 = delta.computeDelta(from: "something entirely different here now")
+		#expect(r2.textToPaste == "")
+	}
+
+	@Test
+	func slidingWindowWithRealisticWordCount() {
+		var delta = LiveTranscriptionDelta()
+
+		// ~20 words, simulating 30s of speech
+		let initial = "I want to make sure that we are scraping all the events and verifying that the links are correct"
+		_ = delta.computeDelta(from: initial)
+		let pastedAfterFirst = delta.pastedWordCount
+		#expect(pastedAfterFirst == 18) // all but "correct" held back
+
+		// Slide: first word drops, new word added at end
+		let slid = "want to make sure that we are scraping all the events and verifying that the links are correct as"
+		let r2 = delta.computeDelta(from: slid)
+		#expect(r2.textToPaste == "correct")
+		#expect(r2.needsLeadingSpace == true)
+
+		// Another slide
+		let slid2 = "to make sure that we are scraping all the events and verifying that the links are correct as well"
+		let r3 = delta.computeDelta(from: slid2)
+		#expect(r3.textToPaste == "as")
+		#expect(r3.needsLeadingSpace == true)
+	}
 }

@@ -4,9 +4,15 @@
 /// should be pasted on each transcription tick. The last word is held back for
 /// one tick to confirm stability — this prevents pasting partial words (e.g.,
 /// "ham" that later becomes "hamburgers").
+///
+/// Handles sliding audio windows: when the capture buffer drops old samples from
+/// the front, the transcription loses leading words. The delta detects this via
+/// suffix-prefix overlap between consecutive transcriptions and adjusts the
+/// pasted word cursor so pasting continues uninterrupted.
 public struct LiveTranscriptionDelta {
 	public var pastedWordCount: Int = 0
 	public var heldBackWord: String?
+	private var previousWords: [String] = []
 
 	public init() {}
 
@@ -32,6 +38,18 @@ public struct LiveTranscriptionDelta {
 	/// - Returns: The text to paste (may be empty if all new words are held back).
 	public mutating func computeDelta(from text: String) -> Result {
 		let words = text.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+
+		// Detect sliding window: if the first word changed, old audio dropped off
+		// the front of the buffer. Find how many words shifted out and adjust.
+		if !previousWords.isEmpty, !words.isEmpty,
+		   previousWords.first != words.first
+		{
+			let shifted = detectWordShift(from: previousWords, to: words)
+			if shifted > 0 {
+				pastedWordCount = max(0, pastedWordCount - shifted)
+			}
+		}
+		previousWords = words
 
 		guard words.count > pastedWordCount else {
 			return Result(textToPaste: "", hasNewContent: false, needsLeadingSpace: false)
@@ -62,6 +80,22 @@ public struct LiveTranscriptionDelta {
 		return Result(textToPaste: delta, hasNewContent: true, needsLeadingSpace: needsLeadingSpace)
 	}
 
+	/// Find how many words shifted out from the front by finding the longest
+	/// suffix of `previous` that matches a prefix of `current`.
+	/// Requires at least half the words to overlap to prevent false matches
+	/// from common short phrases. Returns 0 if no reliable overlap found —
+	/// the delta may get stuck for a tick but won't re-paste.
+	private func detectWordShift(from previous: [String], to current: [String]) -> Int {
+		let maxOverlap = min(previous.count, current.count)
+		let minOverlap = max(3, maxOverlap / 2)
+		for len in stride(from: maxOverlap, through: minOverlap, by: -1) {
+			if previous.suffix(len).elementsEqual(current.prefix(len)) {
+				return previous.count - len
+			}
+		}
+		return 0
+	}
+
 	/// Compute the final delta for the complete transcription after recording stops.
 	/// Pastes all remaining words beyond what was already pasted live.
 	///
@@ -89,5 +123,6 @@ public struct LiveTranscriptionDelta {
 	public mutating func reset() {
 		pastedWordCount = 0
 		heldBackWord = nil
+		previousWords = []
 	}
 }
