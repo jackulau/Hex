@@ -331,12 +331,32 @@ struct PasteboardClientLive {
     }
     
     func simulateTypingWithAppleScript(_ text: String) {
-        let escapedText = text.replacingOccurrences(of: "\"", with: "\\\"")
-        let script = NSAppleScript(source: "tell application \"System Events\" to keystroke \"\(escapedText)\"")
-        var error: NSDictionary?
-        script?.executeAndReturnError(&error)
-        if let error = error {
-            pasteboardLogger.error("Error executing AppleScript typing fallback: \(error)")
+        // Use Accessibility API to insert text directly into the focused element.
+        // Works through screen sharing/remote desktop unlike CGEvent keyboard simulation.
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedElement: AnyObject?
+        let result = AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focusedElement)
+        guard result == .success, let element = focusedElement else {
+            pasteboardLogger.error("Accessibility typing: no focused element found")
+            return
+        }
+        // Try inserting at the current selection point via selectedText replacement
+        let axElement = element as! AXUIElement
+        let insertResult = AXUIElementSetAttributeValue(axElement, kAXSelectedTextAttribute as CFString, text as CFTypeRef)
+        if insertResult != .success {
+            pasteboardLogger.error("Accessibility typing: failed to set selected text (error \(insertResult.rawValue)), falling back to CGEvent")
+            // Fallback to CGEvent for apps that don't support AX text insertion
+            let source = CGEventSource(stateID: .combinedSessionState)
+            for char in text {
+                var utf16 = Array(String(char).utf16)
+                let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true)
+                let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false)
+                keyDown?.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
+                keyUp?.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
+                keyDown?.post(tap: .cgSessionEventTap)
+                keyUp?.post(tap: .cgSessionEventTap)
+                usleep(5000)
+            }
         }
     }
 
