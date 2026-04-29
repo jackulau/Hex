@@ -372,9 +372,9 @@ final class SuperFastCaptureController {
 
     do {
       try recording.file.write(from: converted)
-      // Accumulate samples for live transcription snapshots (cap at 2 minutes)
+      // Accumulate samples for live transcription snapshots (cap at 30 seconds)
       liveTranscriptionSamples.append(contentsOf: UnsafeBufferPointer(start: samples, count: sampleCount))
-      let maxSamples = Int(SuperFastCaptureConstants.sampleRate) * 120
+      let maxSamples = Int(SuperFastCaptureConstants.sampleRate) * 30
       if liveTranscriptionSamples.count > maxSamples {
         liveTranscriptionSamples.removeFirst(liveTranscriptionSamples.count - maxSamples)
       }
