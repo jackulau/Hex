@@ -318,7 +318,7 @@ private extension TranscriptionFeature {
           try await Task.sleep(for: .seconds(1.5))
           while !Task.isCancelled {
             await send(.liveTranscriptionTick)
-            try await Task.sleep(for: .seconds(3))
+            try await Task.sleep(for: .seconds(1))
           }
         }
         .cancellable(id: CancelID.liveTranscriptionTimer, cancelInFlight: true)
@@ -407,28 +407,39 @@ private extension TranscriptionFeature {
       .cancel(id: CancelID.liveTranscriptionSnapshot),
       flushEffect,
       .run { [sleepManagement] send in
-      // Allow system to sleep again
       await sleepManagement.allowSleep()
 
       var audioURL: URL?
       do {
         let capturedURL = await recording.stopRecording()
-        guard !Task.isCancelled else { return }
+        try Task.checkCancellation()
         soundEffect.play(.stopRecording)
         audioURL = capturedURL
 
-        // Create transcription options with the selected language
-        // Note: cap concurrency to avoid audio I/O overloads on some Macs
         let decodeOptions = DecodingOptions(
           language: language,
-          detectLanguage: language == nil, // Only auto-detect if no language specified
+          detectLanguage: language == nil,
           chunkingStrategy: .vad,
         )
-        
-        let result = try await transcription.transcribe(capturedURL, model, decodeOptions) { _ in }
-        
+
+        let result = try await withThrowingTaskGroup(of: String.self) { group in
+          group.addTask {
+            try await transcription.transcribe(capturedURL, model, decodeOptions) { _ in }
+          }
+          group.addTask {
+            try await Task.sleep(for: .seconds(120))
+            throw CancellationError()
+          }
+          let value = try await group.next()!
+          group.cancelAll()
+          return value
+        }
+
         transcriptionFeatureLogger.notice("Transcribed audio from \(capturedURL.lastPathComponent) to text length \(result.count)")
         await send(.transcriptionResult(result, capturedURL))
+      } catch is CancellationError {
+        transcriptionFeatureLogger.warning("Transcription cancelled or timed out")
+        await send(.transcriptionError(TranscriptionTimeoutError(), audioURL))
       } catch {
         transcriptionFeatureLogger.error("Transcription failed: \(error.localizedDescription)")
         await send(.transcriptionError(error, audioURL))
@@ -592,6 +603,7 @@ private extension TranscriptionFeature {
 
 private extension TranscriptionFeature {
   func handleCancel(_ state: inout State) -> Effect<Action> {
+    let wasRecording = state.isRecording
     state.isTranscribing = false
     state.isRecording = false
     state.isPrewarming = false
@@ -602,12 +614,12 @@ private extension TranscriptionFeature {
       .cancel(id: CancelID.liveTranscriptionTimer),
       .cancel(id: CancelID.liveTranscriptionSnapshot),
       .run { [sleepManagement] _ in
-        // Allow system to sleep again
         await sleepManagement.allowSleep()
-        // Stop the recording to release microphone access
-        let url = await recording.stopRecording()
-        guard !Task.isCancelled else { return }
-        try? FileManager.default.removeItem(at: url)
+        if wasRecording {
+          let url = await recording.stopRecording()
+          guard !Task.isCancelled else { return }
+          try? FileManager.default.removeItem(at: url)
+        }
         soundEffect.play(.cancel)
       }
       .cancellable(id: CancelID.recordingCleanup, cancelInFlight: true)
@@ -729,6 +741,12 @@ struct TranscriptionView: View {
     }
     .enableInjection()
   }
+}
+
+// MARK: - Transcription Timeout
+
+private struct TranscriptionTimeoutError: LocalizedError {
+  var errorDescription: String? { "Transcription timed out after 120 seconds" }
 }
 
 // MARK: - Force Quit Command

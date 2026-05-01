@@ -16,14 +16,6 @@
     "storageSize": "650MB"
   },
   {
-    "displayName": "Qwen3 ASR",
-    "internalName": "qwen3-asr-int8",
-    "size": "Multilingual",
-    "accuracyStars": 5,
-    "speedStars": 5,
-    "storageSize": "900MB"
-  },
-  {
     "displayName": "Whisper Small (Tiny)",
     "internalName": "openai_whisper-tiny",
     "size": "Multilingual",
